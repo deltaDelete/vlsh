@@ -1,15 +1,17 @@
 use std::path::Path;
 use argh::FromArgs;
-use gtk4_layer_shell::KeyboardMode;
-use gtk::glib::ExitCode;
+use gtk4_layer_shell::{KeyboardMode};
+use gtk::gio;
+use gtk::glib::{ExitCode};
 use gtk::prelude::*;
 
 const APP_ID : &str = "ru.deltadelete.vlsh";
 
-fn activate(application: &gtk::Application) {
-    let args : Args = argh::from_env();
+fn activate(application: &gtk::Application, args: Args) {
     // Create a normal GTK window
-    let window = gtk::ApplicationWindow::new(application);
+    let window = gtk::Window::builder()
+        .application(application)
+        .build();
 
     // Before the window is first realized, set it up to be a layer surface
     gtk4_layer_shell::init_for_window(&window);
@@ -66,7 +68,7 @@ pub trait VlshExt {
     fn set_monitor(&self, monitor_index : u32);
 }
 
-impl VlshExt for gtk::ApplicationWindow {
+impl VlshExt for gtk::Window {
     fn set_monitor(&self, monitor_index : u32) {
         let monitors = self.surface().display().monitors();
         if monitor_index >= monitors.n_items() {
