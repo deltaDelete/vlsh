@@ -12,7 +12,7 @@ pub mod built_info {
     include!(concat!(env!("OUT_DIR"), "/built.rs"));
 }
 
-fn activate(application: &gtk::Application, args: &Args) {
+fn activate(application: &Application, args: &Args) {
     // Create a normal GTK window
     let window = gtk::Window::builder()
         .application(application)
@@ -96,10 +96,6 @@ impl VlshExt for gtk::Window {
     }
 }
 
-fn default_monitor() -> u32 {
-    0
-}
-
 struct Args {
     /// id of a monitor
     monitor: u32,
@@ -135,12 +131,12 @@ impl Args {
 }
 
 fn main() -> ExitCode {
-    let application = gtk::Application::new(
+    let application = Application::new(
         Some(APP_ID),
         gio::ApplicationFlags::HANDLES_COMMAND_LINE,
     );
 
-    application.connect_activate(|app| {
+    application.connect_activate(|_app| {
         println!("Running in the background");
     });
 
@@ -207,7 +203,7 @@ fn main() -> ExitCode {
     return application.run();
 }
 
-fn handle_options(app: &Application, options: &VariantDict) -> i32 {
+fn handle_options(_app: &Application, options: &VariantDict) -> i32 {
     if options.contains("version") {
         println!("{}", built_info::GIT_VERSION.unwrap());
         return 0;
