@@ -1,13 +1,18 @@
 use std::path::Path;
-use argh::FromArgs;
 use gtk4_layer_shell::{KeyboardMode};
-use gtk::gio;
-use gtk::glib::{ExitCode};
+use gtk::{Application, gio};
+use gtk::gio::{ApplicationCommandLine};
+use gtk::glib::{ExitCode, OptionArg, OptionFlags, VariantDict};
 use gtk::prelude::*;
 
-const APP_ID : &str = "ru.deltadelete.vlsh";
+const APP_ID: &str = "ru.deltadelete.vlsh";
 
-fn activate(application: &gtk::Application, args: Args) {
+pub mod built_info {
+    // The file has been placed there by the build script.
+    include!(concat!(env!("OUT_DIR"), "/built.rs"));
+}
+
+fn activate(application: &gtk::Application, args: &Args) {
     // Create a normal GTK window
     let window = gtk::Window::builder()
         .application(application)
@@ -53,8 +58,10 @@ fn activate(application: &gtk::Application, args: Args) {
     video.set_filename(Some(&Path::new(&args.file)));
 
     // Hiding controls
-    let video_overlay = video.first_child().unwrap();
-    let video_controls = video_overlay.last_child().unwrap();
+    let video_overlay = video.first_child()
+        .expect("Failed to get video controls overlay");
+    let video_controls = video_overlay.last_child()
+        .expect("Failed to get video controls");
     video_controls.set_visible(false);
 
     window.set_child(Some(&video));
@@ -65,17 +72,21 @@ fn activate(application: &gtk::Application, args: Args) {
 }
 
 pub trait VlshExt {
-    fn set_monitor(&self, monitor_index : u32);
+    fn set_monitor(&self, monitor_index: u32);
 }
 
 impl VlshExt for gtk::Window {
-    fn set_monitor(&self, monitor_index : u32) {
+    fn set_monitor(&self, monitor_index: u32) {
         let monitors = self.surface().display().monitors();
         if monitor_index >= monitors.n_items() {
             println!("monitor id is out of bounds");
             std::process::exit(0);
         }
-        let monitor = monitors.item(monitor_index).unwrap().downcast::<gtk::gdk::Monitor>().unwrap();
+        let monitor = monitors.iter::<gtk::gdk::Monitor>()
+            .nth(monitor_index as usize)
+            .expect(&format!("Failed to get monitor with index {}", monitor_index))
+            .expect("Data mutated during iteration");
+
         let width = monitor.geometry().width();
         let height = monitor.geometry().height();
 
@@ -89,36 +100,128 @@ fn default_monitor() -> u32 {
     0
 }
 
-#[derive(FromArgs)]
-/// Set video file as wallpaper
 struct Args {
-    #[argh(option, short = 'm', default = "default_monitor()")]
     /// id of a monitor
     monitor: u32,
-    #[argh(switch, short = 't')]
     /// anchor to top
     anchor_top: bool,
-    #[argh(switch, short = 'b')]
     /// anchor to bottom
     anchor_bottom: bool,
-    #[argh(switch, short = 'l')]
     /// anchor to left
     anchor_left: bool,
-    #[argh(switch, short = 'r')]
     /// anchor to right
     anchor_right: bool,
-    #[argh(positional)]
     /// path to a video
-    file: String
+    file: String,
+}
+
+impl Args {
+    pub fn from_variant_dict(options: &VariantDict, file: Option<String>) -> Self {
+        let monitor_result = options.lookup::<i32>("monitor");
+        let monitor_option = monitor_result.expect("Expected parameter \"monitor\" to be integer value");
+        let monitor = monitor_option.unwrap_or(0);
+
+        let args: Args = Args {
+            monitor: monitor as u32,
+            anchor_top: options.contains("anchor_top"),
+            anchor_bottom: options.contains("anchor_bottom"),
+            anchor_left: options.contains("anchor_left"),
+            anchor_right: options.contains("anchor_right"),
+            file: file.unwrap_or(String::from("")),
+        };
+
+        return args;
+    }
 }
 
 fn main() -> ExitCode {
-    let application = gtk::Application::new(Some(APP_ID), Default::default());
+    let application = gtk::Application::new(
+        Some(APP_ID),
+        gio::ApplicationFlags::HANDLES_COMMAND_LINE,
+    );
 
     application.connect_activate(|app| {
-        activate(app);
+        println!("Running in the background");
     });
 
-    // Running app with empty args so it doesn't pass real args to GTK
-    return application.run_with_args(&Vec::<String>::new());
+    application.add_main_option(
+        "version",
+        gtk::glib::Char::from(b'v'),
+        OptionFlags::NONE,
+        OptionArg::None,
+        "get version",
+        None,
+    );
+
+    application.add_main_option(
+        "anchor_top",
+        gtk::glib::Char::from(b't'),
+        OptionFlags::NONE,
+        OptionArg::None,
+        "anchor to top",
+        None,
+    );
+
+    application.add_main_option(
+        "anchor_bottom",
+        gtk::glib::Char::from(b'b'),
+        OptionFlags::NONE,
+        OptionArg::None,
+        "anchor to bottom",
+        None,
+    );
+
+    application.add_main_option(
+        "anchor_left",
+        gtk::glib::Char::from(b'l'),
+        OptionFlags::NONE,
+        OptionArg::None,
+        "anchor to left",
+        None,
+    );
+
+    application.add_main_option(
+        "anchor_right",
+        gtk::glib::Char::from(b'r'),
+        OptionFlags::NONE,
+        OptionArg::None,
+        "anchor to right",
+        None,
+    );
+
+    application.add_main_option(
+        "monitor",
+        gtk::glib::Char::from(b'm'),
+        OptionFlags::NONE,
+        OptionArg::Int,
+        "set the monitor on which the video will be displayed",
+        Some("<monitor id>"),
+    );
+
+    application.set_option_context_parameter_string(Some("<file>"));
+    application.set_option_context_summary(Some("summary"));
+
+    application.connect_handle_local_options(handle_options);
+    application.connect_command_line(handle_cli);
+
+    return application.run();
+}
+
+fn handle_options(app: &Application, options: &VariantDict) -> i32 {
+    if options.contains("version") {
+        println!("{}", built_info::GIT_VERSION.unwrap());
+        return 0;
+    }
+    return -1;
+}
+
+fn handle_cli(app: &Application, cli: &ApplicationCommandLine) -> i32 {
+    let options = cli.options_dict();
+    let file = String::from(cli.arguments().last().unwrap().to_str().unwrap());
+
+    let args = Args::from_variant_dict(&options, Some(file));
+
+    activate(app, &args);
+
+    return -1;
 }
